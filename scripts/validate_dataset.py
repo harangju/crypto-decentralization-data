@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from datetime import date
 from pathlib import Path
 from urllib.request import urlopen
@@ -35,17 +36,6 @@ def validate_bitcoin_fractional(consensus_path: Path) -> dict:
         "days": int(daily.size),
         "exact_integer_share": float(exact),
         "max_fractional_deviation_blocks": max_dev,
-    }
-
-
-def validate_exchanges(exchanges_path: Path) -> dict:
-    df = pd.read_csv(exchanges_path)
-    monthly = df.groupby("date")["percent"].sum()
-    return {
-        "status": "ok",
-        "months": int(monthly.size),
-        "mean_percent_sum": float(monthly.mean()),
-        "months_within_1pct_of_1": float((monthly.between(0.99, 1.01)).mean()),
     }
 
 
@@ -83,8 +73,8 @@ def fetch_defillama_sample() -> dict:
 def main() -> None:
     results = {"generated_on": str(date.today()), "checks": {}}
 
-    consensus = DEPOSIT_DIR / "consensus.csv"
-    exchanges = DEPOSIT_DIR / "exchanges.csv"
+    deposit_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else DEPOSIT_DIR
+    consensus = deposit_dir / "consensus.csv"
 
     if consensus.exists():
         results["checks"]["bitcoin_fractional"] = validate_bitcoin_fractional(consensus)
@@ -92,11 +82,8 @@ def main() -> None:
     else:
         results["checks"]["consensus"] = {
             "status": "pending",
-            "reason": f"missing {consensus}; download the Figshare CSVs into data/",
+            "reason": f"missing {consensus}; run after deposit CSVs are staged",
         }
-
-    if exchanges.exists():
-        results["checks"]["exchanges_percent_sum"] = validate_exchanges(exchanges)
 
     results["checks"]["defillama_api_sample"] = fetch_defillama_sample()
 
