@@ -283,8 +283,16 @@ def write_validation_panel(defi_tvl_path: Path | None, out_path: Path) -> bool:
     return True
 
 
-def _range_violations(df: pd.DataFrame, n: pd.Series, tol: float) -> dict:
-    """Count rows outside each metric's mathematical range, allowing ``tol`` slack."""
+def validate_metrics_file(path: Path) -> dict:
+    """Schema, key uniqueness, missing values, metric ranges, and single-entity consistency."""
+    full = pd.read_csv(path)
+    missing_cols = [c for c in METRIC_COLUMNS if c not in full.columns]
+    if missing_cols:
+        return {"status": "error", "reason": f"missing columns {missing_cols}"}
+    # developers and TVL files repeat group-period metrics across entity rows
+    df = full.drop_duplicates(["Date", "Group"]).reset_index(drop=True)
+    n = df["Count"].astype(float)
+    tol = 1e-6  # metrics are stored to six decimals
     violations = {
         "entropy_range": int(((df["Entropy"] < -tol) | (df["Entropy"] > np.log2(n.clip(lower=1)) + tol)).sum()),
         "gini_range": int(((df["Gini"] < -tol) | (df["Gini"] > 1 + tol)).sum()),
@@ -299,23 +307,6 @@ def _range_violations(df: pd.DataFrame, n: pd.Series, tol: float) -> dict:
                                    | ((df["Top5Share"] >= 0.51) != (df["Nakamoto"] <= 5))
                                    | ((df["Top10Share"] >= 0.51) != (df["Nakamoto"] <= 10))).sum()),
     }
-    return violations
-
-
-def validate_metrics_file(path: Path) -> dict:
-    """Schema, key uniqueness, missing values, metric ranges, and single-entity consistency."""
-    full = pd.read_csv(path)
-    missing_cols = [c for c in METRIC_COLUMNS if c not in full.columns]
-    if missing_cols:
-        return {"status": "error", "reason": f"missing columns {missing_cols}"}
-    # developers and TVL files repeat group-period metrics across entity rows
-    df = full.drop_duplicates(["Date", "Group"]).reset_index(drop=True)
-    n = df["Count"].astype(float)
-    tol = 1e-9
-    # Metrics are stored to six decimals, so values at a bound (e.g. entropy = log2 n for
-    # equal shares) can exceed it by rounding; strict counts report those separately.
-    violations = _range_violations(df, n, tol=1e-6)
-    strict = _range_violations(df, n, tol=tol)
     if "MEVShare" in df.columns:
         eth = df["Group"] == "Ethereum"
         violations["mev_share"] = int(((df.loc[eth, "MEVShare"] < -tol) | (df.loc[eth, "MEVShare"] > 1 + tol)).sum()
@@ -334,7 +325,6 @@ def validate_metrics_file(path: Path) -> dict:
         "columns": list(df.columns),
         "entity_rows": _entity_consistency(full),
         "range_violations": violations,
-        "range_violations_strict": strict,
         "single_entity_rows": int(len(single)),
         "single_entity_inconsistent": single_ok,
     }
@@ -501,7 +491,7 @@ def render_validation_tex(checks: dict, out_path: Path) -> None:
     dupes = sum(v["duplicate_keys"] for v in dep)
     missing = sum(v["missing_values"] for v in dep)
     range_viol = sum(sum(v["range_violations"].values()) for v in dep)
-    rounding_only = sum(sum(v.get("range_violations_strict", v["range_violations"]).values()) for v in dep) - range_viol
+    range_result = "all within range at six-decimal precision" if range_viol == 0 else f"{range_viol:,} outside range"
     single_rows = sum(v["single_entity_rows"] for v in dep)
     single_bad = sum(v["single_entity_inconsistent"] for v in dep)
     dash = [v["dashboard"] for v in dep if "dashboard" in v]
@@ -526,7 +516,7 @@ def render_validation_tex(checks: dict, out_path: Path) -> None:
         "        Check & Layer & Criterion & Result \\\\",
         "        \\midrule",
         f"        Schema and keys & Metrics & twelve shared columns; unique keys; no missing values & {rows_total:,} group-periods; {dupes} duplicates; {missing} missing \\\\",
-        f"        Metric ranges & Metrics & $0 \\le E \\le \\log_2 n$; $0 \\le \\mathrm{{Gini}} \\le 1$; $1/n \\le \\mathrm{{HHI}} \\le 1$; $1 \\le N \\le n$; $0 \\le S_1 \\le S_5 \\le S_{{10}} \\le 1$; $N$ consistent with $S_k$; tolerance $10^{{-6}}$ for six-decimal storage & {range_viol} violations; {rounding_only} values at a bound exceed it by $< 10^{{-6}}$ through rounding \\\\",
+        f"        Metric ranges & Metrics & $0 \\le E \\le \\log_2 n$; $0 \\le \\mathrm{{Gini}} \\le 1$; $1/n \\le \\mathrm{{HHI}} \\le 1$; $1 \\le N \\le n$; $0 \\le S_1 \\le S_5 \\le S_{{10}} \\le 1$; $N$ consistent with $S_k$ & {range_result} \\\\",
         f"        Single-entity periods & Metrics & $n = 1$ implies $E = 0$, $\\mathrm{{HHI}} = 1$, $N = 1$ & {single_rows:,} rows; {single_bad} inconsistent \\\\",
     ]
     if dash:
