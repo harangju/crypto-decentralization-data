@@ -1,0 +1,12 @@
+[project]
+name = "crypto-decentralization-data"
+version = "0.1.0"
+description = "Pipeline for A Dataset of Decentralization Metrics Across Blockchain Ecosystems"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy",
+    "pandas",
+    "plotly",
+    "kaleido",
+    "statsmodels",
+]
