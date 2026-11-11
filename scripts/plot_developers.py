@@ -1,17 +1,12 @@
-"""Developer figures for the Scientific Data descriptor from the entity-level ``developers.csv``.
+"""Developer contribution figures for the Scientific Data descriptor.
 
-Two figure families, ported from the authors' notebooks (graphs_dev.ipynb and
-graphs_distribution.ipynb). Both read the deposited ``developers_commits.csv``,
-whose authors are pseudonymous ``dev-#####`` IDs; the contribution panels carry
-no legend, so no author is named.
+Ported from the authors' notebook (graphs_dev.ipynb). Reads the deposited
+``developers_commits.csv``, whose authors are pseudonymous ``dev-#####`` IDs;
+the panels carry no legend, so no author is named.
 
 * ``dev_cont_<chain>.png``: monthly share of commits among the five largest
   contributors of each calendar year (stacked bars, percent of those five),
   for Ethereum consensus, Ethereum execution, Bitcoin, and Solana.
-* ``dev_distro_<chain>.png``: degree distribution of the monthly developer
-  co-contribution network, where two authors are linked when they commit to
-  the same client repository in the same month; densities are pooled over all
-  monthly snapshots with at least three developers. Bitcoin, BNB, and Solana.
 
 Usage:
     uv run python scripts/plot_developers.py --entities PATH/developers_commits.csv
@@ -20,7 +15,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-from collections import Counter, defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -39,16 +33,10 @@ CONTRIBUTION_PANELS = [
     ("bitcoin", "dev_cont_bitcoin.png", "(C) Bitcoin", None),
     ("solana", "dev_cont_solana.png", "(D) Solana", None),
 ]
-DISTRIBUTION_PANELS = [
-    ("bitcoin", "dev_distro_bitcoin.png", "Bitcoin"),
-    ("bnb", "dev_distro_bnb.png", "BNB Chain"),
-    ("solana", "dev_distro_solana.png", "Solana"),
-]
 TOP_K_PER_YEAR = 5
 # Pseudonym of the automated "merge-script" identity in bitcoin/bitcoin (not a
 # person); excluded from the contribution panels as in the original notebook.
 EXCLUDE_AUTHORS = {"dev-02562"}
-MIN_DEVS_PER_SNAPSHOT = 3
 
 
 def load_entities(path: Path) -> pd.DataFrame:
@@ -104,46 +92,6 @@ def plot_contributions(shares: pd.DataFrame, title: str) -> go.Figure:
     return fig
 
 
-def degree_density(df: pd.DataFrame) -> tuple[pd.Series, int]:
-    """Pooled degree distribution of monthly co-contribution networks."""
-    counts: Counter[int] = Counter()
-    snapshots = 0
-    for _, month in df.groupby("date"):
-        neighbors: dict[str, set[str]] = defaultdict(set)
-        for _, client in month.groupby("client"):
-            devs = sorted(client["entity"].unique())
-            if len(devs) > 1:
-                for d in devs:
-                    neighbors[d].update(x for x in devs if x != d)
-        if len(neighbors) < MIN_DEVS_PER_SNAPSHOT:
-            continue
-        snapshots += 1
-        counts.update(len(n) for n in neighbors.values())
-    if not counts:
-        return pd.Series(dtype=float), 0
-    s = pd.Series(counts).sort_index()
-    return s / s.sum(), snapshots
-
-
-def plot_distribution(density: pd.Series, title: str) -> go.Figure:
-    fig = go.Figure(
-        go.Scatter(x=density.index.astype(float), y=density.values, mode="lines",
-                   line={"width": 2, "color": "navy"})
-    )
-    fig.update_layout(
-        title={"text": title, "font": {"size": 30}},
-        template="plotly_white",
-        height=500,
-        width=600,
-        margin={"l": 60, "r": 20, "t": 60, "b": 50},
-    )
-    axis = {"type": "log", "dtick": 1, "exponentformat": "power", "showexponent": "all",
-            "title_font": {"size": 20}, "tickfont": {"size": 16}}
-    fig.update_xaxes(title_text="Degree", **axis)
-    fig.update_yaxes(title_text="Density", **axis)
-    return fig
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--entities", type=Path, default=DEFAULT_ENTITIES)
@@ -160,15 +108,6 @@ def main() -> None:
         fig = plot_contributions(shares, title)
         fig.write_image(str(args.figures_dir / filename), scale=2)
         print(f"wrote {filename}: {shares['entity'].nunique()} authors ever in a yearly top {TOP_K_PER_YEAR}")
-
-    for group, filename, title in DISTRIBUTION_PANELS:
-        density, snapshots = degree_density(df[df["group"] == group])
-        if density.empty:
-            print(f"skipped {filename}: no usable snapshots")
-            continue
-        fig = plot_distribution(density, title)
-        fig.write_image(str(args.figures_dir / filename), scale=2)
-        print(f"wrote {filename}: {snapshots} monthly snapshots, max degree {int(density.index.max())}")
 
 
 if __name__ == "__main__":
